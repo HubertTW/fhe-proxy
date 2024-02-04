@@ -3,12 +3,9 @@ use tfhe::integer::{gen_keys_radix, IntegerRadixCiphertext, RadixCiphertext, Rad
 use tfhe::ServerKey;
 use tfhe::shortint::parameters::PARAM_MESSAGE_2_CARRY_2_KS_PBS;
 fn main() {
-    // We generate a set of client/server keys, using the default parameters:
     let num_block = 4;
     let (client_key, server_key) = gen_keys_radix(PARAM_MESSAGE_2_CARRY_2_KS_PBS, num_block);
-    //let one = 1u8;
-    //let zero = 0u8;
-    let mut c = encryptStr("the secret", &client_key);
+    let mut c = encryptStr("the", &client_key);
     let start = Instant::now();
     sanitizer(&mut c, server_key);
     let duration = start.elapsed();
@@ -34,12 +31,12 @@ pub fn decryptStr(content: Vec<RadixCiphertext>, ck: &RadixClientKey) -> String 
 /* PROXY SERVER COMPUTING */
 pub fn sanitizer(content : &mut Vec<RadixCiphertext>, sk: tfhe::integer::ServerKey) {
        println!("start sanitizing...");
-       let target = "sec";
+       let target = "he";
        let mut target_bytes = vec![];
        for i in target.bytes(){
            target_bytes.push(i);
        }
-       for shift in 0..(content.len() - target_bytes.len()) {
+       for shift in 0..(content.len() - target_bytes.len() + 1) {
            let mut byte_comp:Vec<RadixCiphertext> = vec![];
            for j in 0..target_bytes.len() {
                byte_comp.push(sk.smart_scalar_eq_parallelized(&mut content[shift+j], target_bytes[j]).into_radix(4,&sk));
@@ -56,8 +53,6 @@ pub fn sanitizer(content : &mut Vec<RadixCiphertext>, sk: tfhe::integer::ServerK
            for j in 0..target_bytes.len(){
                content[shift+j] = sk.smart_mul_parallelized(&mut mask, &mut content[shift+j]);
            }
-           
-
        }
         println!("sanitizing finished");
 
