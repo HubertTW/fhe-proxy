@@ -11,6 +11,13 @@ use tfhe::shortint::parameters::PARAM_MESSAGE_2_CARRY_2_KS_PBS;
 use tfhe::{set_server_key, ClientKey, FheUint, FheUint16, FheUint16Id, FheUint8, FheUint8Id, ServerKey, FheUint32Id, FheUint32};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let mut k = 5;
+    let mut modulo = 47u64;
+    let final_state = 1u16;
+    let string_size = 5;
+    let mut coef: Vec<u64> = vec![27, 32, 17, 15, 29, 3, 4, 17, 36, 26, 7, 37, 6, 33, 34, 18, 15, 2, 46, 14, 29, 32, 19, 43, 11, 16, 26, 22, 9, 33, 34, 7, 8, 25, 44, 2, 18, 35, 12, 9];
+
+
     let mut file = fs::read("server_key.bin")?;
     let sk = deserialize_sk(file.as_slice())?;
     set_server_key(sk);
@@ -21,25 +28,27 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("deserializing encrypted_str.bin...");
     let file = fs::read("encrypted_str.bin")?;
-    let enc_str = deserialize_str(&file)?;
+    let enc_str = deserialize_str(&file, string_size)?;
 
-    let mut coef: Vec<u64> = vec![1, 8, 8, 7, 18, 5, 12, 5, 5, 17, 2, 3, 15, 12, 12, 2, 3, 7];
-    let mut k = 3;
+    println!("deserializing encrypted_ascii.bin...");
+    let file = fs::read("encrypted_ascii.bin")?;
+    let enc_ascii = deserialize_str(&file, string_size)?;
+
+
     let mut len_coef = coef.len();
-    println!("{}", len_coef);
+    println!("poly degree: {}", len_coef);
     let mut enc_coef = vec![];
     for i in coef {
-        enc_coef.push(FheUint32::encrypt(i, &ck));
+        enc_coef.push(FheUint16::encrypt(i, &ck));
     }
-    let mut modulo = 23u64;
-    let mut enc_modulo = FheUint32::encrypt(modulo, &ck);
-    let final_state = 1u16;
-    let mut enc_final_state = FheUint32::encrypt(final_state, &ck);
+
+    let mut enc_modulo = FheUint16::encrypt(modulo, &ck);
+    let mut enc_final_state = FheUint16::encrypt(final_state, &ck);
 
     println!("calculating poly...");
     let mut state_debug = vec![];
     let mut curr_m_debug = vec![];
-    let mut curr_state = FheUint32::encrypt_trivial(0u8);
+    let mut curr_state = FheUint16::encrypt_trivial(0u8);
     for enc_x in &enc_str {
         let start = Instant::now();
 
@@ -72,14 +81,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         state_debug.push(curr_state.clone());
     }
 
-    //let matching_res: FheUint32 = curr_state.eq(enc_final_state).cast_into();
+    let matching_res: FheUint16 = curr_state.ne(enc_final_state).cast_into();
 
-    /*
+
 
     println!("sanitization...");
     let start = Instant::now();
     let mut sanitized_v = vec![];
-    for enc_x in enc_str {
+    for enc_x in &enc_ascii {
         sanitized_v.push(&matching_res * enc_x);
     }
     let duration = start.elapsed();
@@ -87,16 +96,26 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("serialization...");
     let mut serialized_enc_str = Vec::new();
-    for i in sanitized_v {
+    for i in &sanitized_v {
         bincode::serialize_into(&mut serialized_enc_str, &i)?;
     }
     let mut file_str = File::create("sanitized_payload.bin")?;
     file_str.write(serialized_enc_str.as_slice())?;
     println!("done");
 
+    println!("[debug] decrypt sanitized result");
+    let s = decryptStr(sanitized_v, &ck);
+    println!("the sanitized res is {}", s);
+
+    /*
+    let mut result_clear:Vec<u8>  = vec![];
+    for i in sanitized_v{
+        result_clear.push(i.decrypt(&ck));
+    }
+    println!("the sanitized res is {:?}", result_clear);
+    */
 
 
-     */
 
     //println!("[debug] decryption...");
     //let mut clear: u8 = matching_res.decrypt(&ck);
@@ -140,6 +159,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
     */
 }
+
+pub fn decryptStr(content: Vec<FheUint<FheUint16Id>>, ck: &ClientKey) -> String {
+    let mut v = vec![];
+    for byte in content {
+        v.push(byte.decrypt(&ck));
+    }
+    println!("{:?}", v);
+    String::from_utf8(v).unwrap()
+
+}
 fn deserialize_sk(serialized_data: &[u8]) -> Result<ServerKey, Box<dyn std::error::Error>> {
     let mut to_des_data = Cursor::new(serialized_data);
     let sk: ServerKey = bincode::deserialize_from(&mut to_des_data)?;
@@ -154,10 +183,11 @@ fn deserialize_ck(serialized_data: &[u8]) -> Result<ClientKey, Box<dyn std::erro
 
 fn deserialize_str(
     serialized_data: &[u8],
-) -> Result<Vec<FheUint<FheUint32Id>>, Box<dyn std::error::Error>> {
+    content_size: u8
+) -> Result<Vec<FheUint<FheUint16Id>>, Box<dyn std::error::Error>> {
     let mut to_des_data = Cursor::new(serialized_data);
-    let mut v: Vec<FheUint<FheUint32Id>> = vec![];
-    for _ in 0..2{
+    let mut v: Vec<FheUint<FheUint16Id>> = vec![];
+    for _ in 0..content_size{
         // length of received string
         v.push(bincode::deserialize_from(&mut to_des_data)?);
     }
