@@ -19,11 +19,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut byte_vec = fs::read("client_key.bin")?;
     let ck = deserialize_ck(&byte_vec.into_boxed_slice().deref())?;
 
-    println!("deserializing intercepted_payload.bin...");
+    println!("deserializing encrypted_str.bin...");
     let file = fs::read("encrypted_str.bin")?;
     let enc_str = deserialize_str(&file)?;
 
-    let mut coef: Vec<u64> = vec![13, 14, 3, 15, 17, 13, 22, 14, 17, 21, 11, 12, 1, 1, 9, 21, 21, 7];
+    let mut coef: Vec<u64> = vec![1, 8, 8, 7, 18, 5, 12, 5, 5, 17, 2, 3, 15, 12, 12, 2, 3, 7];
+    let mut k = 3;
     let mut len_coef = coef.len();
     println!("{}", len_coef);
     let mut enc_coef = vec![];
@@ -42,7 +43,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     for enc_x in &enc_str {
         let start = Instant::now();
 
-        let mut curr_m = enc_x + &curr_state * 3;//k
+        let mut curr_m = enc_x + &curr_state * k;//k
         let mut x = vec![];
         x.push(curr_m.clone());
         curr_m_debug.push(curr_m.clone());
@@ -54,7 +55,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         for i in 2..len_coef {
             let mut temp_x = x[i - 2].clone();
-            x.push(&temp_x * &curr_m);
+            x.push(&temp_x * &curr_m % &enc_modulo);
             let mut temp = &x[i - 1] * &enc_coef[i];
             sum = &sum + &temp;
         }
