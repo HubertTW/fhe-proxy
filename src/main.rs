@@ -3,20 +3,20 @@ use std::fs;
 use std::fs::File;
 use std::io::{Cursor, Write};
 use std::ops::Deref;
-use std::time::Instant;
-use tfhe::integer::{gen_keys_radix, IntegerRadixCiphertext, RadixCiphertext, RadixClientKey};
+use std::time::{Duration, Instant};
+use tfhe::integer::{RadixCiphertext};
 use tfhe::prelude::*;
 use tfhe::prelude::{FheDecrypt, FheEncrypt, FheTrivialEncrypt};
-use tfhe::shortint::parameters::PARAM_MESSAGE_2_CARRY_2_KS_PBS;
 use tfhe::{set_server_key, ClientKey, FheUint, FheUint16, FheUint16Id, FheUint8, FheUint8Id, ServerKey, FheUint32Id, FheUint32};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let mut k = 5;
+    let mut k = 3;
     let mut modulo = 47u64;
     let final_state = 1u16;
-    let string_size = 5;
-    let mut coef: Vec<u64> = vec![27, 32, 17, 15, 29, 3, 4, 17, 36, 26, 7, 37, 6, 33, 34, 18, 15, 2, 46, 14, 29, 32, 19, 43, 11, 16, 26, 22, 9, 33, 34, 7, 8, 25, 44, 2, 18, 35, 12, 9];
-
+    let string_size = 3;
+    let mut coef: Vec<u64> = vec![40, 23, 32, 5, 38, 22, 25, 18, 33, 8, 28, 9, 0, 43, 8];
+    let chars = ['a','t'];
+    let code:Vec<u8> = vec![1,2,3];
 
     let mut file = fs::read("server_key.bin")?;
     let sk = deserialize_sk(file.as_slice())?;
@@ -26,13 +26,49 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut byte_vec = fs::read("client_key.bin")?;
     let ck = deserialize_ck(&byte_vec.into_boxed_slice().deref())?;
 
+    /*
     println!("deserializing encrypted_str.bin...");
     let file = fs::read("encrypted_str.bin")?;
     let enc_str = deserialize_str(&file, string_size)?;
+    */
 
     println!("deserializing encrypted_ascii.bin...");
     let file = fs::read("encrypted_ascii.bin")?;
-    let enc_ascii = deserialize_str(&file, string_size)?;
+    let mut enc_ascii = deserialize_str(&file, string_size)?;
+
+    let mut enc_str =  enc_ascii.clone();
+
+    println!("encoding...");
+
+
+    let ascii_bytes: Vec<u8> = chars.iter().map(|&c| c as u8).collect();
+    let mut enc_chars = vec![];
+    let mut enc_code = vec![];
+    for i in ascii_bytes.clone(){
+        enc_chars.push(FheUint16::encrypt_trivial(i));
+    }
+    for i in code.clone(){
+        enc_code.push(FheUint16::encrypt_trivial(i));
+    }
+    let mut enc_zero = FheUint16::encrypt_trivial(0u8);
+    for (i,ascii_val) in enc_str.clone().iter().enumerate(){
+        let mut count = enc_zero.clone();
+        for (j,chars_val) in enc_chars.clone().iter().enumerate() {
+
+            let enc_cmp = ascii_val.eq(chars_val);
+            enc_str[i] = enc_cmp.if_then_else(&enc_code[j], &enc_str[i]);
+            count = &count + &enc_cmp.cast_into();
+        }
+        let enc_final_cmp = &count.eq(&enc_zero);
+        enc_str[i] = enc_final_cmp.if_then_else(&enc_code[code.len()-1], &enc_str[i]);
+
+    }
+
+    let mut encoding_clear:Vec<u8> = vec![];
+    for i in enc_str.clone(){
+        encoding_clear.push(i.decrypt(&ck));
+    }
+    println!("[debug] the encoding is {:?}", encoding_clear);
 
 
     let mut len_coef = coef.len();
@@ -46,53 +82,93 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut enc_final_state = FheUint16::encrypt(final_state, &ck);
 
     println!("calculating poly...");
-    let mut state_debug = vec![];
-    let mut curr_m_debug = vec![];
+    //let mut state_debug = vec![];
+    //let mut curr_m_debug = vec![];
     let mut curr_state = FheUint16::encrypt_trivial(0u8);
-    for enc_x in &enc_str {
+
+    let measurements = 1;
+    let mut elapsed_times: Vec<Duration> = Vec::new();
+    for _ in 0..measurements {
+
+        curr_state = FheUint16::encrypt_trivial(0u8);
         let start = Instant::now();
 
-        let mut curr_m = enc_x + &curr_state * k;//k
-        let mut x = vec![];
-        x.push(curr_m.clone());
-        curr_m_debug.push(curr_m.clone());
+        for enc_x in &enc_str {
 
-        //1+x
-        let mut sum = enc_coef[0].clone();
-        let mut temp = &x[0] * &enc_coef[1];
-        sum = &sum + &temp;
+            let mut curr_m = enc_x + &curr_state * k;
+            let mut x = vec![];
+            x.push(curr_m.clone());
+            //curr_m_debug.push(curr_m.clone());
 
-        for i in 2..len_coef {
-            let mut temp_x = x[i - 2].clone();
-            x.push(&temp_x * &curr_m % &enc_modulo);
-            let mut temp = &x[i - 1] * &enc_coef[i];
+            //1+x
+            let mut sum = enc_coef[0].clone();
+            let mut temp = &x[0] * &enc_coef[1];
             sum = &sum + &temp;
+
+            for i in 2..len_coef {
+                let mut temp_x = x[i - 2].clone();
+                x.push(&temp_x * &curr_m % &enc_modulo);
+                let mut temp = &x[i - 1] * &enc_coef[i];
+                sum = &sum + &temp;
+            }
+
+            //let start_mod = Instant::now();
+            println!("modulo...");
+            curr_state = &sum % &enc_modulo;
+            //let duration_mod = start_mod.elapsed();
+            //println!("the mod duration is {:?}", duration_mod);
+
+
+            //state_debug.push(curr_state.clone());
         }
 
-        let start_mod = Instant::now();
-        println!("modulo...");
-        curr_state = &sum % &enc_modulo;
-        let duration_mod = start_mod.elapsed();
-        println!("the mod duration is {:?}", duration_mod);
+        let elapsed = start.elapsed();
+        elapsed_times.push(elapsed);
 
-        let duration = start.elapsed();
-        println!("the poly duration is {:?}", duration);
-
-        state_debug.push(curr_state.clone());
+        println!("Elapsed time: {:?}", elapsed);
     }
 
+    let total_elapsed: Duration = elapsed_times.iter().sum();
+    let average_elapsed = total_elapsed / (measurements as u32);
+
+    println!("Average poly elapsed time: {:?}", average_elapsed);
+
+    //TODO: multi final states
     let matching_res: FheUint16 = curr_state.ne(enc_final_state).cast_into();
 
 
 
     println!("sanitization...");
-    let start = Instant::now();
+
+    let measurements = 10;
+    let mut elapsed_times: Vec<Duration> = Vec::new();
+
     let mut sanitized_v = vec![];
-    for enc_x in &enc_ascii {
+    for enc_x in enc_ascii.clone() {
         sanitized_v.push(&matching_res * enc_x);
     }
-    let duration = start.elapsed();
-    println!("the sanitization duration is {:?}", duration);
+
+    for _ in 0..measurements {
+
+        let start = Instant::now();
+        for enc_x in enc_ascii.clone() {
+            &matching_res * enc_x;
+        }
+
+        let elapsed = start.elapsed();
+        elapsed_times.push(elapsed);
+
+        println!("sanitization Elapsed time: {:?}", elapsed);
+    }
+
+    // 計算平均經過時間
+    let total_elapsed: Duration = elapsed_times.iter().sum();
+    let average_elapsed = total_elapsed / (measurements as u32);
+
+    println!("Average sanitization elapsed time: {:?}", average_elapsed);
+
+
+
 
     println!("serialization...");
     let mut serialized_enc_str = Vec::new();
@@ -105,7 +181,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("[debug] decrypt sanitized result");
     let s = decryptStr(sanitized_v, &ck);
-    println!("the sanitized res is {}", s);
+    println!("the sanitized res is {:?}", s);
 
     /*
     let mut result_clear:Vec<u8>  = vec![];
@@ -119,6 +195,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     //println!("[debug] decryption...");
     //let mut clear: u8 = matching_res.decrypt(&ck);
+    /*
 
     let mut n_clear:Vec<u16> = vec![];
     for i in state_debug{
@@ -130,7 +207,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     println!("the m is {:?}", m_clear);
     println!("the n is {:?}", n_clear);
-
+    */
     //let mut x_debug:Vec<u64> = vec![];
     //for i in x{
     //    x_debug.push(i.decrypt(&ck));
@@ -162,9 +239,30 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 pub fn decryptStr(content: Vec<FheUint<FheUint16Id>>, ck: &ClientKey) -> String {
     let mut v = vec![];
-    for byte in content {
+
+    for byte in &content {
         v.push(byte.decrypt(&ck));
     }
+
+    let measurements = 100;
+    let mut elapsed_times: Vec<Duration> = Vec::new();
+
+    for _ in 0..measurements {
+        let start = Instant::now();
+        for byte in &content {
+            let temp: u8 = byte.decrypt(&ck);
+        }
+        let elapsed = start.elapsed();
+        elapsed_times.push(elapsed);
+        //println!("Elapsed time: {:?}", elapsed);
+    }
+
+    // 計算平均經過時間
+    let total_elapsed: Duration = elapsed_times.iter().sum();
+    let average_elapsed = total_elapsed / (measurements as u32);
+
+    println!("Average decryption elapsed time: {:?}", average_elapsed);
+
     println!("{:?}", v);
     String::from_utf8(v).unwrap()
 
