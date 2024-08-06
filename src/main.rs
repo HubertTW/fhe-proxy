@@ -10,13 +10,13 @@ use tfhe::prelude::{FheDecrypt, FheEncrypt, FheTrivialEncrypt};
 use tfhe::{set_server_key, ClientKey, FheUint, FheUint16, FheUint16Id, FheUint8, FheUint8Id, ServerKey, FheUint32Id, FheUint32};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let mut k = 3;
+    let mut k = 4;
     let mut modulo = 47u64;
-    let final_state = 1u16;
-    let string_size = 3;
-    let mut coef: Vec<u64> = vec![40, 23, 32, 5, 38, 22, 25, 18, 33, 8, 28, 9, 0, 43, 8];
-    let chars = ['a','t'];
-    let code:Vec<u8> = vec![1,2,3];
+    let final_state:Vec<u16> = vec![1,2];
+    let string_size = 6;
+    let mut coef: Vec<u64> = vec![25, 0, 9, 24, 3, 24, 40, 30, 13, 35, 33, 38, 18, 44, 7, 37, 3, 33, 11, 46];
+    let chars = ['o','f','e'];
+    let code:Vec<u8> = vec![1,2,3,4];
 
     let mut file = fs::read("server_key.bin")?;
     let sk = deserialize_sk(file.as_slice())?;
@@ -79,14 +79,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let mut enc_modulo = FheUint16::encrypt(modulo, &ck);
-    let mut enc_final_state = FheUint16::encrypt(final_state, &ck);
+    let mut enc_final_state = vec![];
+
+    for i in final_state.clone(){
+       enc_final_state.push(FheUint16::encrypt(i, &ck));
+    }
+
 
     println!("calculating poly...");
     //let mut state_debug = vec![];
     //let mut curr_m_debug = vec![];
     let mut curr_state = FheUint16::encrypt_trivial(0u8);
 
-    let measurements = 1;
+    let measurements = 3;
     let mut elapsed_times: Vec<Duration> = Vec::new();
     for _ in 0..measurements {
 
@@ -133,10 +138,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("Average poly elapsed time: {:?}", average_elapsed);
 
+    let debug_state:u8 = curr_state.decrypt(&ck);
+    println!("debug curr state {:?}", debug_state);
+
     //TODO: multi final states
-    let matching_res: FheUint16 = curr_state.ne(enc_final_state).cast_into();
-
-
+    //let matching_res: FheUint16 = curr_state.ne(enc_final_state).cast_into();
+    let mut matching_count:FheUint16 = enc_zero.clone();
+    for i in enc_final_state.clone(){
+        matching_count = matching_count + FheUint16::cast_from(curr_state.eq(i));
+    }
+    let matching_res: FheUint16 = FheUint16::cast_from(matching_count.eq(enc_zero.clone()));
+    /* 1: not matching; 0: matching */
 
     println!("sanitization...");
 
