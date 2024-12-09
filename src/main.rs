@@ -1,5 +1,6 @@
 use bincode;
 use std::fs;
+use std::env;
 use std::fs::File;
 use glob::glob;
 use std::io::{Cursor, Write};
@@ -11,19 +12,21 @@ use tfhe::prelude::{FheDecrypt, FheEncrypt, FheTrivialEncrypt};
 use tfhe::{set_server_key, ClientKey, FheUint, FheUint16, FheUint16Id, FheUint8, FheUint8Id, ServerKey, FheUint32Id, FheUint32};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let mut k = 3;
+    let args: Vec<String> = env::args().collect();
+
+    let mut k = 3 ;
     let mut modulo = 47u64;
     let final_state:Vec<u16> = vec![1];
-    let string_size = 10;
-    let string_number = 3;
-    let mut coef: Vec<u64> = vec![4, 41, 45, 44, 34, 46, 32, 37];
-    let chars = ['f',' '];
+    let string_size = args[1].parse::<u8>().expect("Not a valid u8");;
+    let string_number = args[2].parse::<usize>().expect("Not a valid usize");
+    let mut coef: Vec<u64> = vec![41, 13, 42, 36, 38, 39, 16, 35, 23];
+    let chars = ['f',' '];//consistent with python
     let code:Vec<u8> = vec![1,2,3];
 
     let mut file = fs::read("server_key.bin")?;
     let sk = deserialize_sk(file.as_slice())?;
     set_server_key(sk);
-
+    let args: Vec<String> = env::args().collect();
     println!("DEBUG: deserializing client key...");
     let mut byte_vec = fs::read("client_key.bin")?;
     let ck = deserialize_ck(&byte_vec.into_boxed_slice().deref())?;
@@ -170,34 +173,51 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     //let debug_state:u8 = curr_state.decrypt(&ck);
     //println!("debug curr state {:?}", debug_state);
 
-        //TODO: new sanitization
-    for i in 0..string_number{
-        for (idx, val) in v_states.iter().enumerate() {
-            v_lastchar[i][idx] = &v_lastchar[i][idx] * val.clone();
-        }
-        let mut string_final_state = enc_zero.clone();
-            for val in v_lastchar[i].clone(){
-            string_final_state += val;
+
+
+    println!("sanitization...");
+
+    let measurements = 3;
+    let mut elapsed_times: Vec<Duration> = Vec::new();
+    for _ in 0..measurements {
+        let start = Instant::now();
+
+        for i in 0..string_number {
+            for (idx, val) in v_states.iter().enumerate() {
+                v_lastchar[i][idx] = &v_lastchar[i][idx] * val.clone();
+            }
+            let mut string_final_state = enc_zero.clone();
+            for val in v_lastchar[i].clone() {
+                string_final_state += val;
             }
 
-        println!("checking accepting state...");
-        let mut matching_count:FheUint16 = enc_zero.clone();
-        for i in enc_final_state.clone(){
-            matching_count = matching_count + FheUint16::cast_from(string_final_state.eq(i));
-        }
-        let matching_res = matching_count.eq(enc_zero.clone());
-        //let matching_res: FheUint16 = FheUint16::cast_from(matching_count.eq(enc_zero.clone()));
-        /* 1: not matching; 0: matching */
+            println!("checking accepting state...");
+            let mut matching_count: FheUint16 = enc_zero.clone();
+            for i in enc_final_state.clone() {
+                matching_count = matching_count + FheUint16::cast_from(string_final_state.eq(i));
+            }
+            let matching_res = matching_count.eq(enc_zero.clone());
+            //let matching_res: FheUint16 = FheUint16::cast_from(matching_count.eq(enc_zero.clone()));
+            /* 1: not matching; 0: matching */
 
-        println!("sanitization...");
-        for idx in 0..string_size {
-            let idx_usize = idx as usize;
-           let position_check =  v_string[i][idx_usize.clone()].eq(&enc_zero);
-            v_string[i][idx_usize.clone()] = position_check.if_then_else(&matching_res.if_then_else(&enc_one, &enc_zero), &enc_one);
-            enc_ascii[idx_usize.clone()] = &v_string[i][idx_usize.clone()] * &enc_ascii[idx_usize.clone()];
+            for idx in 0..string_size {
+                let idx_usize = idx as usize;
+                let position_check = v_string[i][idx_usize.clone()].eq(&enc_zero);
+                v_string[i][idx_usize.clone()] = position_check.if_then_else(&matching_res.if_then_else(&enc_one, &enc_zero), &enc_one);
+                enc_ascii[idx_usize.clone()] = &v_string[i][idx_usize.clone()] * &enc_ascii[idx_usize.clone()];
+            }
         }
 
+        let elapsed = start.elapsed();
+        elapsed_times.push(elapsed);
+
+        println!("sanitization elapsed time: {:?}", elapsed);
     }
+
+    let total_elapsed: Duration = elapsed_times.iter().sum();
+    let average_elapsed = total_elapsed / (measurements as u32);
+
+    println!("Average sanitization elapsed time: {:?}", average_elapsed);
 
 
     println!("serialization...");
@@ -322,36 +342,4 @@ fn deserialize_str(
     Ok(v)
 }
 
-/* PROXY SERVER COMPUTING */
-pub fn sanitizer(content: &mut Vec<RadixCiphertext>, sk: tfhe::integer::ServerKey) {
-    println!("start sanitizing...");
-    let target = "he";
-    let mut target_bytes = vec![];
-    for i in target.bytes() {
-        target_bytes.push(i);
-    }
-    for shift in 0..(content.len() - target_bytes.len() + 1) {
-        let mut byte_comp: Vec<RadixCiphertext> = vec![];
-        for j in 0..target_bytes.len() {
-            byte_comp.push(
-                sk.smart_scalar_eq_parallelized(&mut content[shift + j], target_bytes[j])
-                    .into_radix(4, &sk),
-            );
-        }
-        /* if len of target == 1? */
-        let mut b1: RadixCiphertext = byte_comp[0].clone();
-        let mut b2: RadixCiphertext = byte_comp[1].clone();
-        let mut mask = sk.smart_bitand_parallelized(&mut b1, &mut b2);
-        //let mut mask = sk.smart_bitand_parallelized(&mut byte_comp[0],&mut byte_comp[1]);
-        for j in 2..target_bytes.len() - 1 {
-            mask = sk.smart_bitand_parallelized(&mut mask, &mut byte_comp[j]);
-        }
-        mask = sk
-            .smart_scalar_eq_parallelized(&mut mask, 0 as u8)
-            .into_radix(4, &sk);
-        for j in 0..target_bytes.len() {
-            content[shift + j] = sk.smart_mul_parallelized(&mut mask, &mut content[shift + j]);
-        }
-    }
-    println!("sanitizing finished");
-}
+
