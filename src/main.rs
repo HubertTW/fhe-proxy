@@ -15,11 +15,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = env::args().collect();
 
     let mut k = 3 ;
-    let mut modulo = 47u64;
+    let mut modulo = 47u16;
     let final_state:Vec<u16> = vec![1];
     let string_size = args[1].parse::<u8>().expect("Not a valid u8");;
     let string_number = args[2].parse::<usize>().expect("Not a valid usize");
-    let mut coef: Vec<u64> = vec![41, 13, 42, 36, 38, 39, 16, 35, 23];
+    let mut coef: Vec<u16> = vec![41, 13, 42, 36, 38, 39, 16, 35, 23];
     let chars = ['f',' '];//consistent with python
     let code:Vec<u8> = vec![1,2,3];
 
@@ -105,11 +105,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut len_coef = coef.len();
     println!("poly degree: {}", len_coef);
     let mut enc_coef = vec![];
-    for i in coef {
+    for i in coef.clone() {
         enc_coef.push(FheUint16::encrypt_trivial(i)); //FheUint16::encrypt(i, &ck)
     }
 
-    let mut enc_modulo = FheUint16::encrypt_trivial(modulo);//FheUint16::encrypt(modulo, &ck);
+    //let mut enc_modulo = FheUint16::encrypt_trivial(modulo);
     let mut enc_final_state = vec![];
 
     for i in final_state.clone(){
@@ -138,20 +138,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             //curr_m_debug.push(curr_m.clone());
 
             //1+x
-            let mut sum = enc_coef[0].clone();
-            let mut temp = &x[0] * &enc_coef[1];
+            let mut sum = enc_coef[0].clone();;
+            let mut temp = &x[0] * coef[1];
             sum = &sum + &temp;
 
             for i in 2..len_coef {
                 let mut temp_x = x[i - 2].clone();
-                x.push(&temp_x * &curr_m % &enc_modulo);
-                let mut temp = &x[i - 1] * &enc_coef[i];
+                x.push(&temp_x * &curr_m % modulo);
+                let mut temp = &x[i - 1] * coef[i];
                 sum = &sum + &temp;
             }
 
             //let start_mod = Instant::now();
             println!("final modulo...");
-            curr_state = &sum % &enc_modulo;
+            curr_state = &sum % modulo;
             //let duration_mod = start_mod.elapsed();
             //println!("the mod duration is {:?}", duration_mod);
 
