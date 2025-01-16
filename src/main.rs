@@ -16,17 +16,7 @@ use tfhe::{set_server_key, ClientKey, FheUint, FheUint16, FheUint16Id, FheUint8,
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = env::args().collect();
-
-    let mut k = 4 ;
-    let mut modulo = 47u16;
-    let final_state:Vec<u16> = vec![1];
     let string_size = args[1].parse::<u8>().expect("Not a valid u8");;
-    //let string_number = args[2].parse::<usize>().expect("Not a valid usize");
-    let mut coef: Vec<u16> = vec![13, 34, 13, 16, 46, 18, 30, 5, 38, 31, 23, 34, 33, 13, 5, 21, 18, 16, 10, 9];
-    //let chars = ['b','t',' '];//consistent with python
-    let encoding: Vec<u8> = (b'a'..=b'z').collect();
-    let dir_path = "/home/henry/fhe-worker";
-    //let code:Vec<u8> = vec![1,2,3,4];
 
     let mut file = fs::read("server_key.bin")?;
     let sk = deserialize_sk(file.as_slice())?;
